@@ -1,0 +1,202 @@
+# Composition: Azure Storage Account
+# Example B — Realistic Composition
+#
+# Creates two Azure Managed Resources:
+#   1. ResourceGroup  (azure.upbound.io/v1beta1)
+#   2. Account        (storage.azure.upbound.io/v1beta2)
+#
+# The ResourceGroup is only created when spec.parameters.resourceGroupName is empty.
+# When resourceGroupName is set by the developer, we reference that existing RG instead.
+# (For simplicity this example always creates an RG; see comments for the conditional pattern.)
+
+apiVersion: apiextensions.crossplane.io/v2
+kind: Composition
+metadata:
+  name: azure-storageaccount-composition
+  labels:
+    provider: azure
+    crossplane.io/xrd: azurestorageaccounts.platform.example.org
+spec:
+  compositeTypeRef:
+    apiVersion: platform.example.org/v1alpha1
+    kind: AzureStorageAccount
+
+  mode: Pipeline
+
+  pipeline:
+    # ── Step 1: Patch and Transform ──────────────────────────────────────────
+    - step: patch-and-transform
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+
+        # ── Reusable patch sets ─────────────────────────────────────────────
+        patchSets:
+          - name: common-tags
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.tags
+                toFieldPath: spec.forProvider.tags
+                policy:
+                  fromFieldPath: Optional
+
+        resources:
+
+          # ── Composed resource 1: Azure Resource Group ─────────────────────
+          - name: resource-group
+            base:
+              # Provider CRD: kubectl explain resourcegroup.azure.upbound.io.spec.forProvider
+              apiVersion: azure.upbound.io/v1beta1
+              kind: ResourceGroup
+              spec:
+                forProvider:
+                  location: placeholder        # patched below
+                providerConfigRef:
+                  name: azure-provider-config
+                deletionPolicy: Delete
+
+            patches:
+              # XR spec → MR forProvider
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.location
+                toFieldPath: spec.forProvider.location
+
+              # Apply common tags patch set
+              - type: PatchSet
+                patchSetName: common-tags
+
+              # MR status → XR status
+              - type: ToCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: status.resourceGroupName
+
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.id
+                toFieldPath: status.id
+
+          # ── Composed resource 2: Azure Storage Account ────────────────────
+          - name: storage-account
+            base:
+              # Provider CRD: kubectl explain account.storage.azure.upbound.io.spec.forProvider
+              # v1beta2 has more fields than v1beta1 (prefer v1beta2 for new resources)
+              apiVersion: storage.azure.upbound.io/v1beta2
+              kind: Account
+              spec:
+                forProvider:
+                  location: placeholder        # patched below
+                  # Reference the ResourceGroup created above by its MR name.
+                  # Crossplane resolves this to the actual Azure RG name.
+                  resourceGroupNameRef:
+                    name: resource-group       # matches the 'name:' of the composed resource above
+
+                  # Platform-enforced settings (not exposed to developers)
+                  accountKind: StorageV2
+                  accountTier: Standard        # will be overridden by transform if Premium SKU
+                  accountReplicationType: LRS  # patched from spec.parameters.sku
+                  enableHttpsTrafficOnly: true
+                  minTlsVersion: TLS1_2
+                  infrastructureEncryptionEnabled: true
+
+                  # Blob service properties
+                  blobProperties:
+                    - versioningEnabled: false # patched from spec.parameters.enableBlobVersioning
+                      changeFeedEnabled: false
+
+                  networkRules:
+                    - defaultAction: Allow
+                      bypass:
+                        - AzureServices
+                        - Logging
+                        - Metrics
+
+                providerConfigRef:
+                  name: azure-provider-config
+                deletionPolicy: Delete
+                writeConnectionSecretToRef:
+                  name: placeholder            # patched below
+                  namespace: crossplane-system
+
+            patches:
+              # ── XR → MR patches ────────────────────────────────────────────
+
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.location
+                toFieldPath: spec.forProvider.location
+
+              # Map SKU enum to Azure accountTier
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.sku
+                toFieldPath: spec.forProvider.accountTier
+                transforms:
+                  - type: map
+                    map:
+                      Standard_LRS: Standard
+                      Standard_GRS: Standard
+                      Standard_ZRS: Standard
+                      Premium_LRS: Premium
+
+              # Map SKU enum to Azure accountReplicationType
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.sku
+                toFieldPath: spec.forProvider.accountReplicationType
+                transforms:
+                  - type: map
+                    map:
+                      Standard_LRS: LRS
+                      Standard_GRS: GRS
+                      Standard_ZRS: ZRS
+                      Premium_LRS: LRS
+
+              # Set blob versioning from developer input
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.enableBlobVersioning
+                toFieldPath: spec.forProvider.blobProperties[0].versioningEnabled
+
+              # Set public access from developer input
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.allowBlobPublicAccess
+                toFieldPath: spec.forProvider.allowBlobPublicAccess
+
+              # Apply common tags
+              - type: PatchSet
+                patchSetName: common-tags
+
+              # Set connection secret name from developer input
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.writeConnectionSecretToRef.name
+                toFieldPath: spec.writeConnectionSecretToRef.name
+                policy:
+                  fromFieldPath: Optional
+
+              # ── MR status → XR status patches ──────────────────────────────
+
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.id
+                toFieldPath: status.id
+
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.primaryBlobEndpoint
+                toFieldPath: status.primaryBlobEndpoint
+
+              - type: ToCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: status.storageAccountName
+
+            # Propagate connection details (keys) to the XR connection secret
+            connectionDetails:
+              - type: FromConnectionSecretKey
+                fromKey: attribute.primary_access_key
+                name: primaryAccessKey
+              - type: FromConnectionSecretKey
+                fromKey: attribute.primary_connection_string
+                name: primaryConnectionString
+              - type: FromConnectionSecretKey
+                fromKey: attribute.primary_blob_endpoint
+                name: primaryBlobEndpoint
+
+    # ── Step 2: Mark XR ready when all composed resources are ready ──────────
+    - step: auto-ready
+      functionRef:
+        name: function-auto-ready

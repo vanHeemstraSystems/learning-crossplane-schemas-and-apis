@@ -1,0 +1,160 @@
+# XRD: Azure Storage Account
+# Example B — Realistic XRD with enums, defaults, nested objects, status outputs
+#
+# This XRD abstracts an Azure Storage Account behind a platform API.
+# Developers only set the fields they need; the Composition handles all
+# Azure-specific complexity (account tier, TLS version, etc.).
+
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: azurestorageaccounts.platform.example.org   # plural.group
+spec:
+  scope: Namespaced
+  group: platform.example.org
+  names:
+    kind: AzureStorageAccount
+    plural: azurestorageaccounts
+    singular: azurestorageaccount
+    categories:
+      - platform
+      - storage
+    shortNames:
+      - asa
+
+  # Optional: default Composition (developer can override per XR)
+  defaultCompositionRef:
+    name: azure-storageaccount-composition
+
+  # Connection secret keys this XRD can surface to developers
+  connectionSecretKeys:
+    - primaryAccessKey
+    - primaryConnectionString
+    - primaryBlobEndpoint
+
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+
+      # kubectl output columns (optional quality-of-life)
+      additionalPrinterColumns:
+        - name: LOCATION
+          type: string
+          jsonPath: .spec.parameters.location
+        - name: SKU
+          type: string
+          jsonPath: .spec.parameters.sku
+        - name: READY
+          type: string
+          jsonPath: .status.conditions[?(@.type=='Ready')].status
+        - name: AGE
+          type: date
+          jsonPath: .metadata.creationTimestamp
+
+      schema:
+        openAPIV3Schema:
+          type: object            # RULE: root is always object
+          properties:
+
+            # ── spec ─────────────────────────────────────────────────────────
+            spec:
+              type: object
+              properties:
+
+                # ── parameters: developer-facing inputs ──────────────────────
+                parameters:
+                  type: object
+                  description: |
+                    Platform configuration for the Azure Storage Account.
+                    Only these fields are exposed to developers; all other
+                    Azure-specific settings are managed by the platform team.
+                  properties:
+
+                    location:
+                      type: string
+                      description: Azure region for the Storage Account
+                      enum:
+                        - westeurope
+                        - northeurope
+                        - eastus
+                        - eastus2
+                        - westus2
+                        - australiaeast
+
+                    sku:
+                      type: string
+                      description: |
+                        Storage redundancy SKU.
+                        LRS = locally redundant (lowest cost).
+                        GRS = geo-redundant (cross-region DR).
+                        ZRS = zone-redundant (AZ-resilient, same region).
+                      enum:
+                        - Standard_LRS
+                        - Standard_GRS
+                        - Standard_ZRS
+                        - Premium_LRS
+                      default: Standard_LRS
+
+                    resourceGroupName:
+                      type: string
+                      description: |
+                        Name of an existing Azure Resource Group, or leave empty
+                        to have the platform create one automatically.
+
+                    enableBlobVersioning:
+                      type: boolean
+                      description: Enable blob versioning for point-in-time restore
+                      default: false
+
+                    allowBlobPublicAccess:
+                      type: boolean
+                      description: |
+                        Allow anonymous public access to blobs.
+                        Set to false for most production workloads.
+                      default: false
+
+                    tags:
+                      type: object
+                      description: Azure tags as key-value pairs
+                      additionalProperties:
+                        type: string
+
+                  required:
+                    - location    # location is the only mandatory field
+
+                # ── writeConnectionSecretToRef: optional secret output ────────
+                writeConnectionSecretToRef:
+                  type: object
+                  description: |
+                    Write connection details (primary key, connection string,
+                    blob endpoint) to this Kubernetes Secret.
+                  properties:
+                    name:
+                      type: string
+                      description: Name of the Secret to create in this namespace
+                  required:
+                    - name
+
+              required:
+                - parameters    # parameters block is mandatory
+
+            # ── status: outputs written by Crossplane and Azure ───────────────
+            status:
+              type: object
+              properties:
+                id:
+                  type: string
+                  description: |
+                    Full Azure resource ID of the Storage Account.
+                    Format: /subscriptions/{subId}/resourceGroups/{rg}/providers/
+                            Microsoft.Storage/storageAccounts/{name}
+                primaryBlobEndpoint:
+                  type: string
+                  description: Primary blob service endpoint URL
+                resourceGroupName:
+                  type: string
+                  description: Name of the Azure Resource Group containing this account
+                storageAccountName:
+                  type: string
+                  description: The actual Azure name of the Storage Account

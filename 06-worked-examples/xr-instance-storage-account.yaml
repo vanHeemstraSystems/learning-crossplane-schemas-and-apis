@@ -1,0 +1,45 @@
+# XR Instance: AzureStorageAccount
+# What a developer creates after the platform team has applied the XRD and Composition.
+#
+# Note: The developer does NOT write Managed Resources (MRs) directly.
+# They only interact with the XRD-defined API (this file).
+#
+# Apply with:   kubectl apply -f xr-instance-storage-account.yaml -n my-team-namespace
+# Watch with:   kubectl get azurestorageaccount -n my-team-namespace
+#               kubectl describe azurestorageaccount my-project-storage -n my-team-namespace
+
+apiVersion: platform.example.org/v1alpha1   # XRD spec.group / XRD version name
+kind: AzureStorageAccount                   # XRD spec.names.kind
+metadata:
+  name: my-project-storage
+  namespace: my-team-namespace              # XR lives in a namespace (scope: Namespaced)
+spec:
+  parameters:
+    location: westeurope                    # validated by enum in XRD schema
+    sku: Standard_LRS                       # defaults to Standard_LRS if omitted
+    enableBlobVersioning: true              # optional; default is false
+    allowBlobPublicAccess: false            # optional; default is false
+    tags:                                   # optional; arbitrary key-value tags
+      environment: production
+      team: platform-engineering
+      project: atlas-idp
+      costCenter: CC-1234
+
+  # Optional: request a connection secret with credentials
+  writeConnectionSecretToRef:
+    name: my-project-storage-secret        # Secret created in same namespace as XR
+
+# ── Expected status after reconciliation ────────────────────────────────────
+# status:
+#   id: /subscriptions/{subId}/resourceGroups/{rg}/providers/
+#       Microsoft.Storage/storageAccounts/my-project-storage-xxxxx
+#   primaryBlobEndpoint: https://myprojectstoragexxx.blob.core.windows.net/
+#   resourceGroupName: my-project-storage-rg-xxxxx
+#   storageAccountName: myprojectstoragexxx
+#   conditions:
+#     - type: Ready
+#       status: "True"
+#       reason: Available
+#     - type: Synced
+#       status: "True"
+#       reason: ReconcileSuccess
