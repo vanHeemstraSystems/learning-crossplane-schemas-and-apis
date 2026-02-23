@@ -1,0 +1,78 @@
+# Composition: Azure Resource Group
+# Example A — Minimal Composition
+#
+# This Composition implements the AzureResourceGroup XRD.
+# It creates a single Azure Managed Resource: a ResourceGroup.
+
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: azure-resourcegroup-composition
+  labels:
+    provider: azure
+    crossplane.io/xrd: azureresourcegroups.platform.example.org
+spec:
+  # ── Binding ───────────────────────────────────────────────────────────────
+  # compositeTypeRef binds this Composition to the XRD.
+  # apiVersion = XRD spec.group + "/" + referenceable version name
+  # kind       = XRD spec.names.kind
+  compositeTypeRef:
+    apiVersion: platform.example.org/v1alpha1
+    kind: AzureResourceGroup
+
+  # ── Pipeline ──────────────────────────────────────────────────────────────
+  mode: Pipeline    # Only mode in Crossplane v2
+
+  pipeline:
+    # Step 1: Create and patch Azure resources
+    - step: patch-and-transform
+      functionRef:
+        name: function-patch-and-transform   # must be installed as a Function object
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        resources:
+
+          # ── Composed resource: Azure ResourceGroup ────────────────────────
+          - name: resource-group             # logical name (not the Azure name)
+            base:
+              # This is the Azure Managed Resource template.
+              # The provider CRD (ResourceGroup) has its own OpenAPI v3 schema
+              # accessible via: kubectl explain resourcegroup.azure.upbound.io.spec.forProvider
+              apiVersion: azure.upbound.io/v1beta1
+              kind: ResourceGroup
+              spec:
+                forProvider:
+                  location: placeholder    # will be replaced by patch below
+                  tags: {}                 # will be replaced by patch below
+                providerConfigRef:
+                  name: azure-provider-config
+                deletionPolicy: Delete     # Delete Azure RG when this MR is deleted
+
+            patches:
+              # XR → MR: copy location from developer input to Azure MR
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.location
+                toFieldPath: spec.forProvider.location
+
+              # XR → MR: copy tags (if provided)
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.tags
+                toFieldPath: spec.forProvider.tags
+                policy:
+                  fromFieldPath: Optional  # don't fail if developer didn't set tags
+
+              # MR → XR status: write the Azure resource ID back to the XR
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.id
+                toFieldPath: status.id
+
+              # MR → XR status: write the Azure name back to the XR
+              - type: ToCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: status.resourceGroupName
+
+    # Step 2: Mark the XR as ready when all composed resources are ready
+    - step: auto-ready
+      functionRef:
+        name: function-auto-ready

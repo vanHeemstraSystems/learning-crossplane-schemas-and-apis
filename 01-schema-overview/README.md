@@ -7,7 +7,7 @@ Crossplane adds five main object kinds to a Kubernetes cluster. Understanding ho
 | Kind | API group | Who authors it | Purpose |
 |------|-----------|---------------|---------|
 | `CompositeResourceDefinition` (XRD) | `apiextensions.crossplane.io/v2` | Platform engineer | Declares a custom API (schema) |
-| `Composition` | `apiextensions.crossplane.io/v2` | Platform engineer | Describes _how_ to fulfil the API |
+| `Composition` | `apiextensions.crossplane.io/v1` | Platform engineer | Describes _how_ to fulfil the API |
 | `<YourKind>` (XR) | your custom group | Developer | Instantiates the custom API |
 | `<Provider>` Managed Resource (MR) | e.g. `azure.upbound.io/v1beta1` | Crossplane (via Composition) | Maps 1-to-1 to a real cloud resource |
 | `Provider` / `ProviderConfig` | `pkg.crossplane.io/v1` | Platform engineer | Installs and configures the provider |

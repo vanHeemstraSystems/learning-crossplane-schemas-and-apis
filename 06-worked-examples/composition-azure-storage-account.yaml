@@ -9,7 +9,7 @@
 # When resourceGroupName is set by the developer, we reference that existing RG instead.
 # (For simplicity this example always creates an RG; see comments for the conditional pattern.)
 
-apiVersion: apiextensions.crossplane.io/v2
+apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
 metadata:
   name: azure-storageaccount-composition
