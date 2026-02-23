@@ -1,4 +1,4 @@
-# learning-crossplane-schemas
+# Learning Crossplane Schemas and APIs
 
 A structured learning repository for understanding Crossplane v2 schemas — from the highest-level concept map down to the field-level OpenAPI v3 validation rules — with Azure as the provider. By the end you will be able to write any Crossplane YAML configuration file from scratch, grounded in schema and API knowledge.
 
